@@ -4,13 +4,49 @@
 
 分级提示、notes 记录规则同 `harmony-M1.md`。M4 不许跳。
 
-这一端和 Android 最像：同样能拦截 `https://`，同样用 `NativeBridge.postMessage`。所以空集中在「ArkWeb 的 API 长什么样」和三块重点逻辑（拦截器、bridge 分发、白屏判定），并且三块各有一个完整方法要你写。
+这一端和 Android 最像：同样能拦截 `https://`，同样用 `NativeBridge.postMessage`。所以空集中在「ArkWeb 的 API 长什么样」和三块重点逻辑（拦截器、bridge 分发、白屏判定）。**离线包拦截（M4-1 ~ M4-4）已经写好**（spec M4「离线包 case」），读懂即可；bridge、白屏各有一个完整方法要你写。
 
-检查范围：
-- M4-1 ~ M4-3、M4-5、M4-7 ~ M4-9 是纯逻辑（`web/` 目录），本地单测
-- M4-4（`WebResourceResponse`）、M4-6（`javaScriptProxy` 胶水）在 `view/H5Page.ets` 里，ArkWeb 在本地单测里是空壳，靠下面的手工验收
-- 建议顺序：M4-1 → M4-2 → M4-3 → M4-4（这时离线包页面就能打开了）→ M4-5 → M4-6（bridge 通了）→ M4-7 → M4-8 → M4-9
-- 「打开 H5」要等 M4-4 填完才能看到页面；在那之前点进去会崩在 M4-4，正常
+## 直达 H5 页（不用先做完 M1–M3）
+
+正常入口是列表页的「打开 H5」，要 `STAGE >= 4`，而那时列表页会跑到 M1–M3 的空。调试离线包时用 Want 参数 `m3e.h5` 直接打开 H5 页，不渲染列表页、不看 STAGE：
+
+```sh
+# hdc 在 DevEco 里：/Applications/DevEco-Studio.app/Contents/sdk/default/openharmony/toolchains/hdc
+hdc shell aa start -a EntryAbility -b com.example.mobile3end --ps m3e.h5 normal    # 正常页
+hdc shell aa start -a EntryAbility -b com.example.mobile3end --ps m3e.h5 missing   # 值就是 ?case=，还有 blank / slow
+hdc shell aa force-stop com.example.mobile3end                                     # 想从冷启动开始就先杀掉
+hdc hilog -T M3E                                                                   # 看日志
+```
+
+- 要先装好 HAP（DevEco 里 Run 一次就行；`--ps` 传的是字符串参数，`--pb` 是布尔，测试用的 `m3e.sample` 就是布尔）
+- App 已经在跑时，再 `aa start` 走 `onNewWant`，会重新加载直达页，所以换个 case 直接再敲一遍即可
+- 实现：`EntryAbility` 看到 `m3e.h5` 就 `loadContent('pages/H5Entry')` 代替 `pages/Index`，`H5Entry` 里套一层 Navigation 直接压入 `H5Page`
+
+此时（bridge、白屏的空还没填）应该看到：标题「离线包测试页 case=normal」，`location: https://h5.offline.test/index.html`，`bridge: none`，getDeviceInfo 一栏显示 `{"code":"NO_BRIDGE",...}`（红色）。这就是离线包 case 的基线，App 不崩。
+
+## 一进 H5 页就会执行到哪些空
+
+| 时机 | 走到的代码 | 现状 |
+|---|---|---|
+| 每个请求 | `onInterceptRequest` → M4-4 → M4-3 → M4-2 → M4-1 | 已写好 |
+| H5 mount 后立刻调 `getDeviceInfo` | `NativeBridgeProxy.postMessage`（M4-6）→ `BridgeDispatcher.handle`（M4-5） | 空，`M4_BRIDGE = false` 时不注册 bridge，走不到 |
+| 主文档加载完成 `onPageEnd` | `WhiteScreenMonitor.onPageEnd`（M4-7，里面用 M4-9） | 空，`M4_WHITE_SCREEN = false` 时不检测，只打一行日志 |
+| 资源加载失败 `onErrorReceive` | `WhiteScreenMonitor.onErrorReceive`（M4-8） | 同上 |
+| H5 打 console | `h5ErrorLine`（M5-2） | M5 的空，`STAGE < 5` 时不调 |
+
+TODO 会 throw。这些都是 ArkUI / ArkWeb 在主线程上的回调，ArkTS 里没接住的异常一般会变成 JS Crash、App 直接退出（M5 之前没注册 `errorManager`）；`javaScriptProxy` 方法里抛异常 ArkWeb 会怎么处理，文档没写，还没在设备上实测过（🔬 可以自己试：打开 `M4_BRIDGE` 但先不填 M4-6）。稳妥起见 `common/Stage.ets` 里有两个开关，默认关着：
+
+- `M4_BRIDGE`：**填完 M4-5、M4-6 后改成 `true`**。关着时 `onControllerAttached` 里不调 `registerJavaScriptProxy`，H5 看到 `bridge: none`
+- `M4_WHITE_SCREEN`：**填完 M4-7 ~ M4-9 后改成 `true`**。关着时不建 `WhiteScreenMonitor`，`onPageEnd` 打 `M4_WHITE_SCREEN 关着，不做白屏检测`
+
+本地单测直接测纯逻辑，不看这两个开关；`H5Page` 的 `bridgeEnabled` / `whiteScreenEnabled` 也可以显式传。
+
+## 检查范围
+
+- M4-1 ~ M4-3（已写好）、M4-5、M4-7 ~ M4-9 是纯逻辑（`web/` 目录），本地单测
+- M4-4（已写好，`WebResourceResponse`）、M4-6（bridge 胶水）在 `view/H5Page.ets` 里，ArkWeb 在本地单测里是空壳，靠下面的手工验收
+- 设备测试 `m4_0_offlinePageLoads`（ohosTest，示例）：用直达入口打开离线包页，断言 `#app` 有子元素、`location.href` 以 `https://h5.offline.test/index.html` 开头。需要模拟器 / 真机且已签名，`check.sh M4` 会自动跑
+- 建议顺序：先读 M4-1 → M4-4（已写好），用直达入口确认页面能打开 → M4-5 → M4-6 → 打开 `M4_BRIDGE`（bridge 通了）→ M4-7 → M4-8 → M4-9 → 打开 `M4_WHITE_SCREEN`
 
 ---
 
@@ -26,16 +62,13 @@ rawfile 只能放在 `entry/src/main/resources/rawfile/` 里，不能引用工�
 
 ---
 
-## M4-1 取 origin · `web/OfflinePackage.ets`
+## M4-1 取 origin · `web/OfflinePackage.ets`（已写好，读懂即可）
 
-<details><summary>提示 2</summary>
-
-用正则 `^([a-zA-Z][a-zA-Z0-9+.-]*)://([^/?#]*)` 取出 scheme 和 authority。authority 里如果有 `@`，前面是 userinfo（`user:pass@`），真正的 host 在最后一个 `@` 后面。最后整体转小写。
+思路：用正则 `^([a-zA-Z][a-zA-Z0-9+.-]*)://([^/?#]*)` 取出 scheme 和 authority。authority 里如果有 `@`，前面是 userinfo（`user:pass@`），真正的 host 在最后一个 `@` 后面。最后整体转小写。
 
 为什么不用 `url.URL.parseURL`：本地单测里系统 API 是空壳，跑不起来；另外手写一遍才知道 origin 校验有哪些坑。
-</details>
 
-<details><summary>答案</summary>
+代码（已在 `originOf` 里）：
 
 ```ts
 const m = url.match(new RegExp('^([a-zA-Z][a-zA-Z0-9+.-]*)://([^/?#]*)'));
@@ -49,7 +82,6 @@ if (at >= 0) {
 }
 return `${m[1]}://${authority}`.toLowerCase();
 ```
-</details>
 
 想一想：
 - 测试 `m4_1_originOfLookalikes` 里的三个 URL，如果用 `url.startsWith('https://h5.offline.test')` 判断，哪几个会被误放行？线上 App 的容器里校验来源用的是 startsWith、host 白名单，还是别的？
@@ -57,18 +89,17 @@ return `${m[1]}://${authority}`.toLowerCase();
 
 ---
 
-## M4-2 离线包 URL → 包内路径 · `web/OfflinePackage.ets`
+## M4-2 离线包 URL → 包内路径 · `web/OfflinePackage.ets`（已写好，读懂即可）
 
-<details><summary>提示 2</summary>
+步骤：
 
 1. `originOf(url) !== OFFLINE_ORIGIN` → `undefined`
 2. 去掉 `scheme://host`，剩下的部分从第一个 `/`、`?`、`#` 开始
 3. 切掉 `?` 和 `#` 之后的内容，去掉开头的 `/`
 4. 空串或以 `/` 结尾 → 补 `index.html`
 5. `decodeURIComponent`，抛异常就返回未解码的
-</details>
 
-<details><summary>答案</summary>
+代码（已在 `offlinePathOf` 里）：
 
 ```ts
 if (originOf(url) !== OFFLINE_ORIGIN) {
@@ -93,23 +124,21 @@ try {
   return path;
 }
 ```
-</details>
 
 想一想：`?case=blank` 被切掉了，页面怎么还能读到 `case`？（拦截器只管「返回哪个文件」，`location.search` 是浏览器从地址栏 URL 上读的）
 
 ---
 
-## M4-3 决定怎么回答 · `web/OfflinePackage.ets`
+## M4-3 决定怎么回答 · `web/OfflinePackage.ets`（已写好，读懂即可）
 
-<details><summary>提示 2</summary>
+规则：
 
 - `offlinePathOf` 返回 `undefined` → 返回 `undefined`（放行）
 - `path.split('/')` 里有 `'..'` → 404，**不要调用 read**
 - `read(\`${RAWFILE_DIR}/${path}\`)` 为 `undefined` → 404，log 里放**完整的 url**（带 query），排查时才知道是哪个页面、哪个版本请求的
 - 否则 200，`mimeOf(path)`
-</details>
 
-<details><summary>答案</summary>
+代码（已在 `resolveOffline` 里）：
 
 ```ts
 const path = offlinePathOf(url);
@@ -126,7 +155,6 @@ if (data === undefined) {
 }
 return new OfflineResponse(200, 'OK', mimeOf(path), data, '');
 ```
-</details>
 
 想一想：
 - `%2e%2e` 解码后就是 `..`。测试 `m4_3_pathTraversalIsBlocked` 第二个 URL 能被挡住，是因为 M4-2 先解码了。如果先判 `..` 再解码呢？
@@ -134,19 +162,18 @@ return new OfflineResponse(200, 'OK', mimeOf(path), data, '');
 
 ---
 
-## M4-4 组装 WebResourceResponse · `view/H5Page.ets`
+## M4-4 组装 WebResourceResponse · `view/H5Page.ets`（已写好，读懂即可）
 
-完整方法，没有单测（ArkWeb 在本地单测里是空壳，`new WebResourceResponse()` 能创建但方法都是 undefined）。
+完整方法，没有单测（ArkWeb 在本地单测里是空壳，`new WebResourceResponse()` 能创建但方法都是 undefined），设备测试 `m4_0_offlinePageLoads` 和直达入口能看到它的效果。
 
-<details><summary>提示 2</summary>
+步骤：
 
 1. `event.request.getRequestUrl()` 拿 URL
 2. `resolveOffline(url, (p: string) => this.readRawfile(p))`，`undefined` → `return null`
 3. `result.log` 非空 → `Log.w(result.log)`
 4. `new WebResourceResponse()`，依次 `setResponseData`（`ArrayBuffer`；404 时没有数据，给空串）、`setResponseEncoding('utf-8')`、`setResponseMimeType`、`setResponseCode`、`setReasonMessage`、`setResponseIsReady(true)`
-</details>
 
-<details><summary>答案</summary>
+代码（已在 `interceptRequest` 里）：
 
 ```ts
 const url = event.request.getRequestUrl();
@@ -166,7 +193,6 @@ resp.setReasonMessage(result.reason);
 resp.setResponseIsReady(true);
 return resp;
 ```
-</details>
 
 想一想：
 - `onInterceptRequest` 是同步回调，`readRawfile` 用的是 `getRawFileContentSync`，在哪个线程执行？大文件（几 MB 的 js）会卡什么？（提示：查 `setResponseIsReady(false)` 的用法，以及 ArkWeb 的 `WebSchemeHandler`）
@@ -250,8 +276,8 @@ this.controller.runJavaScript(js).catch((e: Error) => Log.e(`bridge: runJavaScri
 
 想一想：
 - `getUrl()` 拿到的是「发消息那一刻的页面 URL」吗？如果页面里嵌了一个 `https://example.com` 的 iframe，iframe 里调 `NativeBridge.postMessage`，`getUrl()` 返回什么？Android 的 `addJavascriptInterface` 有同样的问题吗？（这是 bridge 安全里最常见的洞）
-- 已经有一层：`H5Page.ets` 里 `javaScriptProxy` 的 `permission` 只允许 `https://h5.offline.test` 调用。🔬 把 `bridgePermission()` 里的 host 改错，H5 页面上点按钮会看到什么？日志里搜 `Jsb Permission Denied`
-- spec 说「加载其他页面时不注入」。`javaScriptProxy` 会注入到所有页面（包括 example.com），🔬 在 example.com 的 DevTools Console 里输入 `window.NativeBridge` 看看。要做到真正不注入，可以怎么改？（提示：`registerJavaScriptProxy` / `deleteJavaScriptRegister` + `onPageBegin` 里判断 URL，注意「下次加载才生效」）
+- 已经有一层：`H5Page.ets` 的 `registerBridge` 里，`registerJavaScriptProxy` 的最后一个参数 `permission` 只允许 `https://h5.offline.test` 调用。🔬 把 `bridgePermission()` 里的 host 改错，H5 页面上点按钮会看到什么？日志里搜 `Jsb Permission Denied`
+- spec 说「加载其他页面时不注入」。现在是在 `onControllerAttached` 里注册一次（和 Web 的 `.javaScriptProxy(...)` 属性效果一样），之后所有页面都有（包括 example.com），🔬 在 example.com 的 DevTools Console 里输入 `window.NativeBridge` 看看。要做到真正不注入，可以怎么改？（提示：`deleteJavaScriptRegister` + `onPageBegin` 里判断 URL，注意「注册 / 删除都是下次加载才生效」）
 
 ---
 
@@ -380,7 +406,9 @@ return elapsedMs >= SLOW_DEADLINE_MS ? CheckDecision.WHITE : CheckDecision.RETRY
 
 ## 手工验收（对照 spec M4）
 
+- [ ] 离线包 case（基线，已写好）：直达入口 `--ps m3e.h5 normal` 打开，看到「离线包测试页」标题、`location` 是 `https://h5.offline.test/index.html`，App 不崩；`bridge: none`、getDeviceInfo 显示 `NO_BRIDGE` 是正常的（两个开关还关着）
 - [ ] 列表页「打开 H5」→ 全屏 H5，地址是 `https://h5.offline.test/index.html`
+- [ ] 以下 bridge 几条要先打开 `M4_BRIDGE`，白屏几条要先打开 `M4_WHITE_SCREEN`
 - [ ] 离线包：DevTools 里 `index.html` / `app.js` / `style.css` 都是 200，MIME 正确；`?case=missing` 时日志有 `[OFFLINE_404] https://h5.offline.test/missing.js`，页面其余部分正常
 - [ ] 页面上 getDeviceInfo 显示 `platform: "harmony"`，`bridge:` 一行显示 `android-or-harmony`
 - [ ] 点 toast：弹原生 toast，H5 日志 `toast ok {}`

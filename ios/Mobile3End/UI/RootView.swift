@@ -10,12 +10,16 @@ enum Route: Hashable {
 struct RootView: View {
     let services: AppServices
 
-    @State private var path: [Route] = LaunchOptions.h5Case.map { [.h5($0)] } ?? []
+    @State private var path: [Route] = []
     /// M1 阶段的排序状态。M2 起改由 FileListModel 持有并持久化
     @State private var m1Order: SortOrder = .name
 
     var body: some View {
-        if services.stage == 0 {
+        if let h5Case = LaunchOptions.h5Case {
+            // 调试直达（-M3EH5Case）：只有 H5 页，不渲染列表页，不碰 M1–M3 的空。
+            // 不能用「path 初值放一个 .h5」的写法：那样列表页仍是栈底的根视图，照样会被渲染
+            NavigationStack { H5Screen(initialCase: h5Case) }
+        } else if services.stage == 0 {
             M0View()
         } else {
             NavigationStack(path: $path) {

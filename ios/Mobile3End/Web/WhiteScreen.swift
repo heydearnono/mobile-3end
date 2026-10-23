@@ -44,6 +44,11 @@ final class WhiteScreenDetector {
         status = "检测中…"
     }
 
+    /// M4_WHITE_SCREEN 关着：状态条上说明没检测，免得一直显示「检测中…」
+    func markDisabled() {
+        status = "未开启"
+    }
+
     func report(_ reason: WhiteScreenReason?, url: URL?) {
         let urlText = url?.absoluteString ?? "nil"
         if let reason {

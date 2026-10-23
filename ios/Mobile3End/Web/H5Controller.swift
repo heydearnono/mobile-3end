@@ -29,12 +29,20 @@ final class H5Controller: NSObject, WKNavigationDelegate, WKScriptMessageHandler
 
     let webView: WKWebView
     let page = H5PageState()
+    /// M4 开关（见 App/Stage.swift 的 M4_BRIDGE / M4_WHITE_SCREEN）。关着时不会执行到对应的空
+    let bridgeEnabled: Bool
+    let whiteScreenEnabled: Bool
     private let schemeHandler: OfflineSchemeHandler
     private var dispatcher: BridgeDispatcher!
+    /// 当前主文档是不是离线包页面（离线包页面才注入 handler）
     private var bridgeInjected = false
     private var checkTask: Task<Void, Never>?
 
-    init(deviceInfo: DeviceInfo = .current()) {
+    init(deviceInfo: DeviceInfo = .current(),
+         bridgeEnabled: Bool = LaunchOptions.m4Bridge,
+         whiteScreenEnabled: Bool = LaunchOptions.m4WhiteScreen) {
+        self.bridgeEnabled = bridgeEnabled
+        self.whiteScreenEnabled = whiteScreenEnabled
         let page = self.page
         let package = OfflinePackage.bundled { message in
             M3ELog.d(message)
@@ -56,6 +64,7 @@ final class H5Controller: NSObject, WKNavigationDelegate, WKScriptMessageHandler
 
         dispatcher = BridgeDispatcher(deviceInfo: deviceInfo, showToast: { page.showToast($0) })
         webView.navigationDelegate = self
+        M3ELog.d("H5Controller bridge=\(bridgeEnabled ? "on" : "off(M4_BRIDGE)") whiteScreen=\(whiteScreenEnabled ? "on" : "off(M4_WHITE_SCREEN)")")
     }
 
     func load(_ testCase: H5Case) {
@@ -71,19 +80,24 @@ final class H5Controller: NSObject, WKNavigationDelegate, WKScriptMessageHandler
     }
 
     /// 只在离线包页面上暴露 NativeBridge（spec：加载其他页面时不注入）。
-    /// 注意 add 会强引用 handler，直接 add(self) 会和 webView 形成循环引用，所以包一层 WeakScriptMessageHandler
+    /// 注意 add 会强引用 handler，直接 add(self) 会和 webView 形成循环引用，所以包一层 WeakScriptMessageHandler。
+    /// M4_BRIDGE 关着时只注入 M5 的 M3EError，不注入 NativeBridge：H5 看到 `bridge: none`，不会调到 M4-6
     private func setBridgeInjected(_ on: Bool) {
         guard on != bridgeInjected else { return }
         bridgeInjected = on
         let ucc = webView.configuration.userContentController
         if on {
-            ucc.add(WeakScriptMessageHandler(self), name: Self.bridgeName)
+            if bridgeEnabled { ucc.add(WeakScriptMessageHandler(self), name: Self.bridgeName) }
             ucc.add(WeakScriptMessageHandler(self), name: Self.errorName)
         } else {
-            ucc.removeScriptMessageHandler(forName: Self.bridgeName)
+            if bridgeEnabled { ucc.removeScriptMessageHandler(forName: Self.bridgeName) }
             ucc.removeScriptMessageHandler(forName: Self.errorName)
         }
-        M3ELog.d("[BRIDGE] \(on ? "注入" : "移除") NativeBridge")
+        if bridgeEnabled {
+            M3ELog.d("[BRIDGE] \(on ? "注入" : "移除") NativeBridge")
+        } else if on {
+            M3ELog.d("[BRIDGE] M4_BRIDGE 关着，不注入 NativeBridge")
+        }
     }
 
     func runJS(_ js: String) {
@@ -113,7 +127,7 @@ final class H5Controller: NSObject, WKNavigationDelegate, WKScriptMessageHandler
     // MARK: - Native → H5 推送
 
     // 空 M4-7：App 前后台切换时给 H5 推 appState 事件 { event: "appState", data: { state } }。
-    // 当前不是离线包页面（bridgeInjected 为 false）时不推
+    // 当前不是离线包页面（bridgeInjected 为 false）时不推。M4_BRIDGE 关着时 H5Screen 不会调到这里
     // 提示 1：M3-5 的 appStateName 已经把 phase 翻译好了；BridgeJS.event 拼 JS
     func scenePhaseChanged(_ phase: ScenePhase) {
         TODO("M4-7")
@@ -147,6 +161,12 @@ final class H5Controller: NSObject, WKNavigationDelegate, WKScriptMessageHandler
     // 提示 1：Task { } + Task.sleep(for:)；这里 JS 一定返回数字，可以用 async 版 evaluateJavaScript，失败当 nil
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         M3ELog.d("didFinish \(webView.url?.absoluteString ?? "nil")")
+        // 开关关着时不检测（不会执行到下面的空）。填完 M4-8、M4-9、M4-10 后打开 Stage.swift 的 M4_WHITE_SCREEN
+        guard whiteScreenEnabled else {
+            M3ELog.d("白屏检测开关 M4_WHITE_SCREEN 关着，跳过检测")
+            page.detector.markDisabled()
+            return
+        }
         TODO("M4-9")
     }
 
@@ -162,6 +182,12 @@ final class H5Controller: NSObject, WKNavigationDelegate, WKScriptMessageHandler
         let ns = error as NSError
         let url = ns.userInfo[NSURLErrorFailingURLErrorKey] as? URL ?? webView.url
         M3ELog.d("主文档加载失败 \(ns.domain) \(ns.code) \(url?.absoluteString ?? "nil")")
+        // 开关关着时不判定（不会执行到 M4-10 的空）
+        guard whiteScreenEnabled else {
+            M3ELog.d("白屏检测开关 M4_WHITE_SCREEN 关着，不判定 load_error")
+            page.detector.markDisabled()
+            return
+        }
         if let reason = WhiteScreen.reasonForLoadError(error) {
             checkTask?.cancel()
             page.detector.report(reason, url: url)

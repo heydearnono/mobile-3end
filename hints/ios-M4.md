@@ -4,39 +4,60 @@
 
 M4 是项目目标本身，不许跳。时间盒 8h。
 
+## 离线包 case（基线，已写好）
+
+离线包拦截（M4-1、M4-2、M4-3）已经写好，读懂即可。不用做 M1–M3，现在就能打开离线包页面：看到「离线包测试页 case=normal」标题、`location: appoffline://h5/index.html`，App 不崩。此时 bridge、白屏检测的空还没填，页面上 `bridge: none`、`getDeviceInfo` 显示 `NO_BRIDGE` 失败、状态条「白屏检测：未开启」都是正常的。
+
+**直达入口**：启动参数 `-M3EH5Case <case>`（值见 `Web/H5Case.swift`：`normal`、`blank`、`missing`、`slow`……）。带了它就只显示 H5 页，不看 `STAGE`、不渲染列表页、不碰 M1–M3 的空（`STAGE = 0` 也行）。
+
+- Xcode：Product → Scheme → Edit Scheme…（⌘<）→ 左侧 Run → Arguments → Arguments Passed On Launch 点 `+`，填 `-M3EH5Case normal`，勾上。不用时取消勾选即可回到正常入口
+- 命令行（模拟器已启动、App 已经用 Xcode 装过一次）：
+
+```bash
+xcrun simctl launch booted com.example.mobile3end -M3EH5Case normal
+# 换用例 / 临时打开开关（-M3EBridge、-M3EWhiteScreen 覆盖下面两个常量，只对这一次启动生效）
+xcrun simctl launch --terminate-running-process booted com.example.mobile3end -M3EH5Case missing
+xcrun simctl launch --terminate-running-process booted com.example.mobile3end -M3EH5Case normal -M3EBridge YES
+```
+
+**两个开关**（`App/Stage.swift`）：iOS 的空是 `fatalError`，一进 H5 页就会碰到 bridge（H5 一启动就调 `getDeviceInfo` → M4-6）和白屏检测（加载完成 → M4-9），切前后台会碰到 M4-7，App 直接崩。所以先关着：
+
+| 常量 | 关着时 | 什么时候打开 |
+|---|---|---|
+| `M4_BRIDGE` | 不注入 `NativeBridge`（M5 的 `M3EError` 照常注入），不推 appState | 填完 M4-4、M4-5、M4-6、M4-7（M4-7 用到 M3-5 的 `appStateName`，没做 M3 的话先把 M3-5 填了） |
+| `M4_WHITE_SCREEN` | 加载完成 / 加载失败都不判定白屏，打一行日志「白屏检测开关 M4_WHITE_SCREEN 关着」 | 填完 M4-8、M4-9、M4-10 |
+
+UI 测试用启动参数 `-M3EBridge YES/NO`、`-M3EWhiteScreen YES/NO` 显式指定，不受这两个常量影响。
+
+---
+
 整体结构（逻辑和胶水分开，逻辑都有单测）：
 
 | 文件 | 内容 | 空 |
 |---|---|---|
-| `Web/OfflinePackage.swift` | URL → (状态码, MIME, 数据)，纯逻辑 | M4-1、M4-2 |
-| `Web/OfflineSchemeHandler.swift` | `WKURLSchemeHandler`，把上面的结果回给 WebView | M4-3（完整方法） |
+| `Web/OfflinePackage.swift` | URL → (状态码, MIME, 数据)，纯逻辑 | M4-1、M4-2（已写好） |
+| `Web/OfflineSchemeHandler.swift` | `WKURLSchemeHandler`，把上面的结果回给 WebView | M4-3（已写好，完整方法） |
 | `Web/Bridge.swift` | 来源校验、消息分发，纯逻辑 | M4-4、M4-5（完整方法） |
 | `Web/H5Controller.swift` | WKWebView 接线：bridge 收发、导航回调、白屏检测 | M4-6、M4-7、M4-9（完整方法） |
 | `Web/WhiteScreen.swift` | 白屏判定，纯逻辑 | M4-8、M4-10 |
 
-建议顺序：M4-1 → M4-2 → M4-3（页面能显示了）→ M4-4 → M4-5 → M4-6（bridge 通了）→ M4-8 → M4-9（白屏检测）→ M4-7 → M4-10 → 手工任务。
+建议顺序：先读懂 M4-1 → M4-2 → M4-3（已写好，用直达入口看页面）→ M4-4 → M4-5 → M4-6 → M4-7（bridge 通了，打开 `M4_BRIDGE`）→ M4-8 → M4-9 → M4-10（打开 `M4_WHITE_SCREEN`）→ 手工任务。
 
-一进 H5 页就会执行到 M4-3（加载资源）、M4-6（H5 一启动就调 getDeviceInfo）、M4-9（加载完成），所以 **UI 测试要等 M4-1 ~ M4-6、M4-8、M4-9 都填完才陆续变绿**，之前会显示「运行到了未填的 M4-x」。另外 STAGE = 4 时列表页依赖 M1–M3 的空都已填好。纯逻辑单测（`m4_1_mimeByExtension` 等）不受影响，先盯着它们做。`./check.sh M4` 约 1–2 分钟。
+一进 H5 页就会执行到 M4-3（加载资源，已写好）、M4-6（H5 一启动就调 getDeviceInfo）、M4-9（加载完成），scenePhase 变化（H5 页出现时、切前后台）执行到 M4-7。开关关着时后三个都碰不到，页面照常渲染。`./check.sh M4` 里示例 `m4_0_offlinePageLoads` 和 M4-1 ~ M4-3 的测试一开始就是 ✅（它们显式关着开关跑）；其余 UI 测试显式打开两个开关，要等对应的空填完才变绿，之前显示「运行到了未填的 M4-x」。注意 App 启动时 scenePhase 会从 inactive 变成 active，H5 页一出现就会调到 M4-7，所以 M4-4 ~ M4-7 没填完之前，这些 UI 测试（包括白屏检测的）大多显示「运行到了未填的 M4-7」。纯逻辑单测（`m4_4_onlyOfflineOriginTrusted` 等）不受开关影响，先盯着它们做。每撞到一个未填的空，测试进程重启要等 20 多秒，空多的时候 `./check.sh M4` 要好几分钟；只想看某几个测试可以直接用 xcodebuild 的 `-only-testing:Mobile3EndUITests/M4UiTests/<测试名>`。
 
 调 H5 时同时开着 Xcode 控制台（过滤 `M3E`）和 Safari Web Inspector（见手工任务），一个看原生日志，一个看 H5 的 Console / Network。
 
 ---
 
-## M4-1 MIME 表 · `Web/OfflinePackage.swift`
-
-<details><summary>提示 2</summary>
+## M4-1 MIME 表 · `Web/OfflinePackage.swift`（已写好，读懂即可）
 
 `UTType(filenameExtension: "png")?.preferredMIMEType` 就是 `"image/png"`。系统表里的扩展名是小写的。
-</details>
-
-<details><summary>答案</summary>
 
 ```swift
 UTType(filenameExtension: ext.lowercased())?.preferredMIMEType ?? "application/octet-stream"
 ```
 
 自己写表也可以：`["html": "text/html", "js": "text/javascript", "css": "text/css", ...][ext.lowercased()] ?? "application/octet-stream"`。
-</details>
 
 想一想：
 - MIME 给错了会怎样？🔬 临时把 `.js` 返回成 `text/plain`，页面还能跑吗？（浏览器对 `<script>` 的 MIME 检查比对 `<link rel=stylesheet>` 宽松，可以都试一下；`type="module"` 的脚本呢？）
@@ -44,17 +65,14 @@ UTType(filenameExtension: ext.lowercased())?.preferredMIMEType ?? "application/o
 
 ---
 
-## M4-2 URL → 包内文件 · `Web/OfflinePackage.swift`
+## M4-2 URL → 包内文件 · `Web/OfflinePackage.swift`（已写好，读懂即可）
 
-<details><summary>提示 2</summary>
+思路：
 
 1. `guard Self.owns(url)`
 2. `url.path` 是 `/index.html`（不含查询串、已经 percent-decode），去掉开头的 `/`，拼到 `root` 上
 3. `.standardizedFileURL` 把 `..` 消掉，消完检查路径是不是还以 `root` 开头（注意要比 `root + "/"`，否则 `h5-secret/` 也会被当成在 `h5/` 里）
 4. `try? Data(contentsOf:)` 读不到（不存在 / 是目录）就 404
-</details>
-
-<details><summary>答案</summary>
 
 ```swift
 guard Self.owns(url) else { return notFound(url) }
@@ -67,7 +85,6 @@ guard file.path.hasPrefix(rootPath + "/"),
 }
 return OfflineResponse(status: 200, mime: Self.mimeType(forExtension: file.pathExtension), data: data)
 ```
-</details>
 
 想一想：
 - `m4_2_pathTraversalBlocked` 防的是什么攻击？谁能构造出 `appoffline://h5/../xxx` 这样的请求？（页面里任何一个 `<img src>`、`fetch`）读到包外文件能拿到什么？
@@ -76,20 +93,9 @@ return OfflineResponse(status: 200, mime: Self.mimeType(forExtension: file.pathE
 
 ---
 
-## M4-3 WKURLSchemeHandler · `Web/OfflineSchemeHandler.swift`（完整方法）
+## M4-3 WKURLSchemeHandler · `Web/OfflineSchemeHandler.swift`（已写好，完整方法，读懂即可）
 
-<details><summary>提示 2</summary>
-
-`WKURLSchemeTask` 的三个方法必须按顺序调：`didReceive(URLResponse)` → `didReceive(Data)`（可以多次）→ `didFinish()`。响应用
-
-```swift
-HTTPURLResponse(url:statusCode:httpVersion:headerFields:)
-```
-
-头里放 `Content-Type`。
-</details>
-
-<details><summary>答案</summary>
+`WKURLSchemeTask` 的三个方法必须按顺序调：`didReceive(URLResponse)` → `didReceive(Data)`（可以多次）→ `didFinish()`。响应用 `HTTPURLResponse(url:statusCode:httpVersion:headerFields:)`，头里放 `Content-Type`。
 
 ```swift
 guard let url = urlSchemeTask.request.url else {
@@ -110,7 +116,6 @@ urlSchemeTask.didReceive(response)
 urlSchemeTask.didReceive(result.data)
 urlSchemeTask.didFinish()
 ```
-</details>
 
 想一想：
 - 🔬 用例菜单选「Android 的离线包地址」（`https://h5.offline.test/index.html`）：页面能出来吗？状态条显示什么？为什么 iOS 不能像 Android 的 `shouldInterceptRequest` 那样直接拦 https？（提示：试试在 `H5Controller.init` 里 `setURLSchemeHandler(..., forURLScheme: "https")`，看崩溃信息）。这条差异记进 compare.md「能否拦截 http/https」
@@ -227,7 +232,7 @@ if let js = dispatcher.handle(body, origin: origin) {
 
 ### 注入时机（compare.md「注入时机」一行）
 
-`H5Controller` 在 `decidePolicyFor navigationAction` 里决定加不加 `NativeBridge`：主文档是离线包就加，否则移除。
+`H5Controller` 在 `decidePolicyFor navigationAction` 里决定加不加 `NativeBridge`：主文档是离线包就加，否则移除（`M4_BRIDGE` 关着时只加 M5 的 `M3EError`，所以离线包页面上也是 `bridge: none`）。
 
 想一想：
 - 🔬 页面 `app.js` 的第一行就能看到 `window.webkit.messageHandlers.NativeBridge` 吗？（页面上 `bridge: ios` 那一行就是证据）Android 的 `addJavascriptInterface` 要在 `loadUrl` 之前调用才对第一个页面生效，两边对比一下
@@ -237,6 +242,8 @@ if let js = dispatcher.handle(body, origin: origin) {
 ---
 
 ## M4-7 推送 appState · `Web/H5Controller.swift`
+
+M4-4 ~ M4-7 填完后，把 `App/Stage.swift` 的 `M4_BRIDGE` 改成 `true`：页面上变成 `bridge: ios`，getDeviceInfo 显示 `"platform": "ios"`。
 
 <details><summary>提示 2</summary>
 
@@ -280,6 +287,8 @@ return count == 0 ? .emptyRoot : nil
 
 ## M4-9 主文档加载完成后检测 · `Web/H5Controller.swift`（完整方法）
 
+方法开头的 `guard whiteScreenEnabled` 是开关，不用动，只替换 `TODO("M4-9")` 那一行。
+
 <details><summary>提示 2</summary>
 
 ```swift
@@ -320,6 +329,8 @@ checkTask = Task { [weak self] in
 ---
 
 ## M4-10 主文档加载失败算不算白屏 · `Web/WhiteScreen.swift`
+
+M4-8、M4-9、M4-10 填完后，把 `App/Stage.swift` 的 `M4_WHITE_SCREEN` 改成 `true`：状态条从「未开启」变成「正常」/ `empty_root` / `load_error`。
 
 <details><summary>提示 2</summary>
 

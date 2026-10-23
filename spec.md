@@ -110,6 +110,7 @@ Native 主动推送的事件：`appState`，`data: { state: "foreground" | "back
 ## M4 WebView 容器（重点）
 
 - [ ] 新增 H5 页：从列表页入口进入，全屏 WebView，按上文的地址加载离线包
+- [ ] **离线包 case（基线，三端已写好）**：离线包页面正常加载，能看到「离线包测试页」标题、`location` 是离线包地址，App 不崩。此时 bridge、白屏检测的空还没填，页面上 `getDeviceInfo` 显示失败是正常的
 - [ ] 离线包拦截：包内资源 200 + 正确 MIME；包外资源 404 + `[OFFLINE_404]` 日志
 - [ ] H5 页面显示 `getDeviceInfo` 的返回值，`platform` 正确
 - [ ] H5 点按钮调 `toast`，弹出原生 toast，H5 收到成功回调

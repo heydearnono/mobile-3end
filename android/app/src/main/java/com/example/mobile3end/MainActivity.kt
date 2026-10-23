@@ -8,9 +8,15 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.material3.MaterialTheme
+import com.example.mobile3end.lifecycle.AppLifecycle
+import com.example.mobile3end.web.H5Case
+import com.example.mobile3end.web.H5Screen
 
 // 全工程统一的日志 tag，Logcat 里用 `tag:M3E` 过滤
 const val TAG = "M3E"
+
+/** M4 直达入口的 intent extra 名，见 onCreate */
+const val EXTRA_H5 = "m3e.h5"
 
 /**
  * M3：Activity 的生命周期回调都打了日志，Logcat 过滤 `tag:M3E`，切前后台、旋转屏幕时看顺序。
@@ -22,8 +28,25 @@ class MainActivity : ComponentActivity() {
         Log.d(TAG, "MainActivity.onCreate sdk=${Build.VERSION.SDK_INT} restored=${savedInstanceState != null} @${hashCode()}")
 
         enableEdgeToEdge()
+        // M4 直达入口（调试用）：adb shell am start -S -n com.example.mobile3end/.MainActivity --es m3e.h5 normal
+        // 带了这个 extra 就只显示 H5 页：不渲染列表页、不看 STAGE、不碰 M1–M3 的空。值是 H5Case 的 key（normal / blank / missing / slow ……）
+        val directH5 = intent.getStringExtra(EXTRA_H5)
+        if (directH5 != null) Log.d(TAG, "直达 H5 页 case=$directH5，跳过列表页")
         setContent {
-            MaterialTheme { App() }
+            MaterialTheme {
+                if (directH5 != null) {
+                    H5Screen(
+                        initialCase = H5Case.of(directH5),
+                        // 没有列表页可回，返回就是关掉这个 Activity
+                        onBack = ::finish,
+                        // 只读当前值，不调 AppLifecycle.install()：STAGE < 3 时一直是 null，不推 appState
+                        appState = AppLifecycle.appState,
+                        captureH5Errors = STAGE >= 5,
+                    )
+                } else {
+                    App()
+                }
+            }
         }
     }
 

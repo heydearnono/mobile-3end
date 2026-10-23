@@ -50,11 +50,13 @@ private val MIME_TABLE = mapOf(
 fun mimeOf(path: String): String =
     MIME_TABLE[path.substringAfterLast('/').substringAfterLast('.', "").lowercase()] ?: "application/octet-stream"
 
-// 空 M4-1：这个 URL 是不是离线包 origin（https://h5.offline.test）。scheme、host、端口三样都要对上
-// 不是合法的 http(s) URL（比如 file:///、about:blank、乱写的字符串）返回 false
-// 提示 1：url.toHttpUrlOrNull() 解析失败返回 null；HttpUrl 有 scheme / host / port，https 没写端口时 port 是 443
+// 已写好（原空 M4-1）：这个 URL 是不是离线包 origin（https://h5.offline.test）。读懂即可，想一想见 hints/M4.md
+// - scheme、host、端口三样都要对上
+// - 不是合法的 http(s) URL（比如 file:///、about:blank、乱写的字符串）返回 false
+// 要点：url.toHttpUrlOrNull() 解析失败返回 null；HttpUrl 已经把 host 转成小写、去掉了 user:pass@，https 没写端口时 port 是 443
 fun isOfflineOrigin(url: String): Boolean {
-    TODO("M4-1")
+    val u = url.toHttpUrlOrNull() ?: return false
+    return u.scheme == "https" && u.host == OFFLINE_HOST && u.port == 443
 }
 
 /**
@@ -64,10 +66,12 @@ fun isOfflineOrigin(url: String): Boolean {
  * 例：https://h5.offline.test/index.html?case=blank → index.html；https://h5.offline.test/img/%E5%9B%BE.png → img/图.png
  */
 fun offlinePathOf(url: String): String? {
-    // 空 M4-2：按上面的规则实现
-    // 提示 1：先用 M4-1 判 origin；HttpUrl 的 pathSegments 是已经解码、按 / 切好的路径段（不含查询串），
-    //        "https://h5.offline.test/" 的 pathSegments 是 [""]
-    TODO("M4-2")
+    // 已写好（原空 M4-2）：按上面的规则实现。读懂即可
+    // 要点：先用 M4-1 判 origin；HttpUrl 的 pathSegments 是已经解码、按 / 切好的路径段（不含查询串），
+    //      "https://h5.offline.test/" 的 pathSegments 是 [""]，"https://h5.offline.test/docs/" 是 ["docs", ""]
+    if (!isOfflineOrigin(url)) return null
+    val path = url.toHttpUrl().pathSegments.joinToString("/")
+    return if (path.isEmpty() || path.endsWith("/")) path + "index.html" else path
 }
 
 /** 离线包对一个请求的回答 */
@@ -95,7 +99,10 @@ fun notFound(url: String) = OfflineResponse(404, "Not Found", "text/plain", Byte
  * @param read 按 assets 里的路径读文件，没有返回 null。真实的实现在 H5Container 里（AssetManager.open），测试里是假的
  */
 fun resolveOffline(url: String, read: (assetPath: String) -> ByteArray?): OfflineResponse? {
-    // 空 M4-3：按上面的规则实现整个方法
-    // 提示 1：路径来自 M4-2；404 用写好的 notFound(url)；read 的参数要带上 ASSET_DIR 前缀
-    TODO("M4-3")
+    // 已写好（原空 M4-3）：按上面的规则实现整个方法。读懂即可
+    // 要点：路径来自 M4-2；有 `..` 段时直接 404，不要调用 read；404 用写好的 notFound(url)；read 的参数要带上 ASSET_DIR 前缀
+    val path = offlinePathOf(url) ?: return null
+    if (path.split('/').any { it == ".." }) return notFound(url)
+    val data = read("$ASSET_DIR/$path") ?: return notFound(url)
+    return OfflineResponse(200, "OK", mimeOf(path), data, log = null)
 }

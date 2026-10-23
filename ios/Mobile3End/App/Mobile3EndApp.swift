@@ -42,6 +42,11 @@ final class AppServices {
 
     static func make() -> AppServices {
         guard !LaunchOptions.isUnitTestHost else { return AppServices(stage: 0, model: nil, lifecycle: nil) }
+        // 调试直达 H5 页：不依赖 STAGE，也不创建列表数据和生命周期对象（M2 / M3 的空）
+        if let h5Case = LaunchOptions.h5Case {
+            M3ELog.d("直达 H5 页 case=\(h5Case.rawValue)，跳过 STAGE 接线")
+            return AppServices(stage: 0, model: nil, lifecycle: nil)
+        }
         let stage = LaunchOptions.stage
 
         if LaunchOptions.reset {

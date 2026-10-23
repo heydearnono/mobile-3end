@@ -17,6 +17,7 @@ import com.example.mobile3end.model.FileItem
 import com.example.mobile3end.model.FileType
 import com.example.mobile3end.ui.FileListViewModel
 import com.example.mobile3end.web.OFFLINE_ENTRY
+import com.example.mobile3end.web.OFFLINE_ORIGIN
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -32,8 +33,9 @@ import java.io.File
 import java.util.UUID
 
 /**
- * M4 WebView 行为检查，需要模拟器：真的加载离线包、真的走 bridge。方法名前缀 = 覆盖的空。
- * 一进页面就会用到 M4-1 ~ M4-6，所以这些空没填完之前，大部分测试会报「运行到了未填的 M4-x」
+ * M4 WebView 行为检查，需要模拟器：真的加载离线包、真的走 bridge。方法名前缀 = 覆盖的空，m4_0_ 是示例。
+ * 离线包拦截（M4-1 ~ M4-4）已写好，页面能打开；一进页面还会用到 M4-5、M4-6（H5 立刻调 getDeviceInfo），
+ * 所以 bridge 没填完之前，依赖 bridge 的测试会报「运行到了未填的 M4-x」
  */
 @RunWith(AndroidJUnit4::class)
 class M4UiTest {
@@ -52,6 +54,29 @@ class M4UiTest {
     @After
     fun tearDown() {
         if (::web.isInitialized) web.onMain { web.container.destroy() }
+    }
+
+    // ---------- 示例：离线包页面能打开（M4-1 ~ M4-4 已写好） ----------
+
+    /**
+     * 离线包 case 的基线：页面渲染出来、地址是离线包地址。
+     * 这时 bridge（M4-5、M4-6）和白屏（M4-8 ~ M4-11）的空可能还没填，页面一打开就会碰到，被 TodoGuard 接住，
+     * 所以这里不看 TodoGuard.hits，只看页面本身
+     */
+    @Test
+    fun m4_0_offlinePageLoads() {
+        open()
+        val end = System.currentTimeMillis() + 8_000
+        var count = 0
+        while (System.currentTimeMillis() < end) {
+            count = web.eval("(document.getElementById('app') || {}).childElementCount || 0")?.toIntOrNull() ?: 0
+            if (count > 0) break
+            Thread.sleep(100)
+        }
+        assertTrue("离线包页面没有渲染出来（#app 为空）。日志：${web.logs.takeLast(8)}", count > 0)
+        val href = web.eval("location.href").orEmpty()
+        assertTrue("location 应该是离线包地址，实际是 $href", href.startsWith("$OFFLINE_ORIGIN/"))
+        assertTrue(web.eval("document.querySelector('#app h1').textContent").orEmpty().startsWith("离线包测试页"))
     }
 
     // ---------- M4-4 离线包拦截 ----------

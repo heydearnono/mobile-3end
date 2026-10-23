@@ -13,3 +13,8 @@ export const FILES_PATH: string = '/api/files.json';
 export const WANT_KEY_API_BASE: string = 'm3e.apiBase';
 // UI 测试强制用写死数据，不受 STAGE 影响
 export const WANT_KEY_SAMPLE: string = 'm3e.sample';
+/**
+ * 直达 H5 页（调试用）：带上这个 Want 参数启动，不进列表页，直接打开离线包页面，不会跑到 M1–M3 的空。
+ * 值是 H5 测试用例名：normal（无 case）/ blank / missing / slow，见 pages/H5Entry.ets。命令见 hints/harmony-M4.md 开头
+ */
+export const WANT_KEY_H5: string = 'm3e.h5';

@@ -128,13 +128,25 @@ class H5Container(
         _offline404.update { it + 1 }
     }
 
-    // 空 M4-4：离线包拦截。不是离线包的请求返回 null（放行，WebView 自己走网络）；
+    // 已写好（原空 M4-4）：离线包拦截。读懂即可，想一想见 hints/M4.md
+    // 不是离线包的请求返回 null（放行，WebView 自己走网络）；
     // 是的话用 resolveOffline 的结果组装 WebResourceResponse，有 log 就交给 reportOffline404
     // - 这个方法跑在 WebView 的后台线程上，不是主线程（所以这里不能碰 webView）
     // - 读文件用写好的 readAsset
-    // 提示 1：WebResourceResponse 有一个 6 个参数的构造函数，能带状态码和原因短语；data 要的是 InputStream
+    // 要点：3 个参数的构造函数状态码固定是 200，所以用 6 个参数的那个（能带状态码和原因短语，原因短语不能是空串）；
+    //      data 要的是 InputStream
     fun interceptRequest(request: WebResourceRequest): WebResourceResponse? {
-        TODO("M4-4")
+        val url = request.url.toString()
+        val result = resolveOffline(url, ::readAsset) ?: return null
+        result.log?.let(::reportOffline404)
+        return WebResourceResponse(
+            result.mime,
+            "utf-8",
+            result.status,
+            result.reason,
+            emptyMap(),
+            ByteArrayInputStream(result.data),
+        )
     }
 
     /**

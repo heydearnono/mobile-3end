@@ -56,7 +56,9 @@ struct H5Screen: View {
         }
         .onDisappear { M3ELog.d("H5Screen.onDisappear") }
         .onChange(of: scenePhase) { _, phase in
-            controller?.scenePhaseChanged(phase)
+            // M4_BRIDGE 关着时不推 appState（不会执行到 M4-7 的空）
+            guard let controller, controller.bridgeEnabled else { return }
+            controller.scenePhaseChanged(phase)
         }
     }
 

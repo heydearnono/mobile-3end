@@ -10,11 +10,27 @@ final class OfflineSchemeHandler: NSObject, WKURLSchemeHandler {
         self.package = package
     }
 
-    // 空 M4-3：WebView 发来一个 appoffline:// 请求，用 package.resolve 找到内容，按顺序回给 task：
-    // 响应头（状态码 + Content-Type）→ 数据 → 完成。task.request.url 为 nil 时 didFailWithError
-    // 提示 1：响应要用 HTTPURLResponse，普通 URLResponse 带不了状态码
+    // 已写好（原空 M4-3）：WebView 发来一个 appoffline:// 请求，用 package.resolve 找到内容，按顺序回给 task。读懂即可
+    // 顺序固定：响应头（状态码 + Content-Type）→ 数据（可以分多次）→ 完成。task.request.url 为 nil 时 didFailWithError。
+    // 响应要用 HTTPURLResponse：普通 URLResponse 带不了状态码，404 时 H5 的 <script> 就收不到 onerror
     func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
-        TODO("M4-3")
+        guard let url = urlSchemeTask.request.url else {
+            urlSchemeTask.didFailWithError(URLError(.badURL))
+            return
+        }
+        let result = package.resolve(url)
+        let response = HTTPURLResponse(
+            url: url,
+            statusCode: result.status,
+            httpVersion: "HTTP/1.1",
+            headerFields: [
+                "Content-Type": result.mime,
+                "Content-Length": String(result.data.count),
+            ]
+        )!
+        urlSchemeTask.didReceive(response)
+        urlSchemeTask.didReceive(result.data)
+        urlSchemeTask.didFinish()
     }
 
     func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {
