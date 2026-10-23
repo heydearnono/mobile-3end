@@ -1,0 +1,77 @@
+# xcodegen 配置：改了这里之后在 ios/ 目录执行 `xcodegen generate` 重新生成 Mobile3End.xcodeproj
+# 平时直接用 Xcode 打开 Mobile3End.xcodeproj 即可，不需要每次生成
+name: Mobile3End
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    # Swift 6 语言模式：数据竞争是编译错误而不是警告。理由见 hints/ios-M3.md「语言模式」
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    # 真机运行时在 Xcode 的 Signing & Capabilities 里选自己的 Personal Team，见 hints/ios-M0.md
+    CODE_SIGN_STYLE: Automatic
+targets:
+  Mobile3End:
+    type: application
+    platform: iOS
+    sources:
+      - path: Mobile3End
+      # 离线包：直接引用三端共用的 mock/h5，folder reference（蓝色文件夹），不复制
+      # 打进 .app 后路径是 Mobile3End.app/h5/
+      - path: ../mock/h5
+        type: folder
+        buildPhase: resources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.mobile3end
+        PRODUCT_NAME: Mobile3End
+        # Info.plist 是手写的（M2 要手工加 ATS 配置），不让 Xcode / xcodegen 生成
+        INFOPLIST_FILE: Mobile3End/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        # 和 Xcode 26 起新建工程的默认值一致：没标注的代码默认跑在主线程（MainActor）
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+        ENABLE_PREVIEWS: YES
+  Mobile3EndTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Mobile3EndTests]
+    dependencies:
+      - target: Mobile3End
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.mobile3end.tests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+  Mobile3EndUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Mobile3EndUITests]
+    dependencies:
+      - target: Mobile3End
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.mobile3end.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+schemes:
+  Mobile3End:
+    build:
+      targets:
+        Mobile3End: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - name: Mobile3EndTests
+          parallelizable: false
+        - name: Mobile3EndUITests
+          parallelizable: false
+    archive:
+      config: Release

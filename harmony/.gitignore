@@ -1,0 +1,15 @@
+# DevEco 模板默认
+/node_modules
+/oh_modules
+/local.properties
+/.idea
+**/build
+/.hvigor
+.cxx
+/.clangd
+/.clang-format
+/.clang-tidy
+**/.test
+/.appanalyzer
+# 离线包：构建前从 ../mock/h5 同步过来（mock/h5 是唯一来源），不进版本库
+/entry/src/main/resources/rawfile/h5/
